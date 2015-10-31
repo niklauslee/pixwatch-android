@@ -23,6 +23,8 @@ import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattDescriptor;
+import android.bluetooth.BluetoothGattServer;
+import android.bluetooth.BluetoothGattServerCallback;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
@@ -32,6 +34,8 @@ import android.os.Binder;
 import android.os.IBinder;
 import android.util.Log;
 
+import java.util.Calendar;
+import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 
@@ -46,6 +50,7 @@ public class PixwatchService extends Service {
     private BluetoothAdapter mBluetoothAdapter;
     private String mBluetoothDeviceAddress;
     private BluetoothGatt mBluetoothGatt;
+    private BluetoothGattServer mBluetoothGattServer;
     private int mConnectionState = STATE_DISCONNECTED;
 
     private static final int STATE_DISCONNECTED = 0;
@@ -111,6 +116,81 @@ public class PixwatchService extends Service {
         public void onCharacteristicChanged(BluetoothGatt gatt,
                                             BluetoothGattCharacteristic characteristic) {
             broadcastUpdate(ACTION_DATA_AVAILABLE, characteristic);
+        }
+    };
+
+    private final BluetoothGattServerCallback mGattServerCallback = new BluetoothGattServerCallback() {
+        @Override
+        public void onConnectionStateChange(BluetoothDevice device, int status, int newState) {
+            Log.d("HELLO", "Our gatt server connection state changed, new state ");
+            Log.d("HELLO", Integer.toString(newState));
+            super.onConnectionStateChange(device, status, newState);
+        }
+
+        @Override
+        public void onServiceAdded(int status, BluetoothGattService service) {
+            Log.d("HELLO", "Our gatt server service was added.");
+            super.onServiceAdded(status, service);
+        }
+
+        @Override
+        public void onCharacteristicReadRequest(BluetoothDevice device, int requestId, int offset, BluetoothGattCharacteristic characteristic) {
+            Log.d("HELLO", "Our gatt characteristic was read.");
+
+
+            byte[] data = new byte[10];
+            Calendar c = Calendar.getInstance();
+            short year = (short) c.get(Calendar.YEAR);
+            byte month = (byte) (c.get(Calendar.MONTH) + 1);
+            byte day = (byte) c.get(Calendar.DAY_OF_MONTH);
+            byte hour = (byte) c.get(Calendar.HOUR_OF_DAY);
+            byte minute = (byte) c.get(Calendar.MINUTE);
+            byte second = (byte) c.get(Calendar.SECOND);
+            byte dow = (byte) (c.get(Calendar.DAY_OF_WEEK) - 1);
+            if (dow < 1) { dow = 7; }
+
+            Log.d("HELLO", "YEAR=" + year);
+
+            data[0] = (byte) (year & 0xff);
+            data[1] = (byte) ((year >> 8) & 0xff);
+            data[2] = month;
+            data[3] = day;
+            data[4] = hour;
+            data[5] = minute;
+            data[6] = second;
+            data[7] = dow;
+            data[8] = 0;
+            data[9] = 0;
+
+            mBluetoothGattServer.sendResponse(device, requestId, 0, offset, data);
+
+            super.onCharacteristicReadRequest(device, requestId, offset, characteristic);
+
+        }
+
+        @Override
+        public void onCharacteristicWriteRequest(BluetoothDevice device, int requestId, BluetoothGattCharacteristic characteristic, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
+            Log.d("HELLO", "We have received a write request for one of our hosted characteristics");
+
+            super.onCharacteristicWriteRequest(device, requestId, characteristic, preparedWrite, responseNeeded, offset, value);
+        }
+
+        @Override
+        public void onDescriptorReadRequest(BluetoothDevice device, int requestId, int offset, BluetoothGattDescriptor descriptor) {
+            Log.d("HELLO", "Our gatt server descriptor was read.");
+            super.onDescriptorReadRequest(device, requestId, offset, descriptor);
+        }
+
+        @Override
+        public void onDescriptorWriteRequest(BluetoothDevice device, int requestId, BluetoothGattDescriptor descriptor, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
+            Log.d("HELLO", "Our gatt server descriptor was written.");
+            super.onDescriptorWriteRequest(device, requestId, descriptor, preparedWrite, responseNeeded, offset, value);
+        }
+
+        @Override
+        public void onExecuteWrite(BluetoothDevice device, int requestId, boolean execute) {
+            Log.d("HELLO", "Our gatt server on execute write.");
+            super.onExecuteWrite(device, requestId, execute);
         }
     };
 
@@ -195,6 +275,9 @@ public class PixwatchService extends Service {
             Log.e(TAG, "Unable to obtain a BluetoothAdapter.");
             return false;
         }
+
+        //JDD - lets go ahead and start our GATT server now
+        addDefinedGattServerServices();
 
         return true;
     }
@@ -282,6 +365,15 @@ public class PixwatchService extends Service {
         mBluetoothGatt.readCharacteristic(characteristic);
     }
 
+    public void writeRemoteCharacteristic(BluetoothGattCharacteristic characteristic) {
+
+        if (mBluetoothAdapter == null || mBluetoothGatt == null) {
+            Log.w(TAG, "BluetoothAdapter not initialized");
+            return;
+        }
+        mBluetoothGatt.writeCharacteristic(characteristic);
+    }
+
     /**
      * Enables or disables notification on a give characteristic.
      *
@@ -316,4 +408,23 @@ public class PixwatchService extends Service {
 
         return mBluetoothGatt.getServices();
     }
+
+    public void addGattServerService(BluetoothGattService service)
+    {
+        mBluetoothGattServer.addService(service);
+    }
+
+    public void addDefinedGattServerServices( )
+    {
+        mBluetoothGattServer = mBluetoothManager.openGattServer(this, mGattServerCallback);
+        BluetoothGattService service = new BluetoothGattService(UUID.fromString(SampleGattAttributes.CURRENT_TIME_SERVICE_UUID), BluetoothGattService.SERVICE_TYPE_PRIMARY);
+        BluetoothGattCharacteristic characteristic = new BluetoothGattCharacteristic(UUID.fromString(SampleGattAttributes.CURRENT_TIME), BluetoothGattCharacteristic.PROPERTY_READ, BluetoothGattCharacteristic.PERMISSION_READ);
+
+        service.addCharacteristic(characteristic);
+        mBluetoothGattServer.addService(service);
+
+        Log.d("HELLO", "Created our own GATT server.\r\n");
+
+    }
+
 }
