@@ -37,6 +37,7 @@ import android.util.Log;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
+import java.util.TimeZone;
 import java.util.UUID;
 
 /**
@@ -137,7 +138,7 @@ public class PixwatchService extends Service {
         public void onCharacteristicReadRequest(BluetoothDevice device, int requestId, int offset, BluetoothGattCharacteristic characteristic) {
             Log.d("HELLO", "Our gatt characteristic was read.");
 
-
+            /*
             byte[] data = new byte[10];
             Calendar c = Calendar.getInstance();
             short year = (short) c.get(Calendar.YEAR);
@@ -161,6 +162,25 @@ public class PixwatchService extends Service {
             data[7] = dow;
             data[8] = 0;
             data[9] = 0;
+            */
+
+            // Obtain current unix time
+            long time = System.currentTimeMillis() / 1000L;
+            Log.d("HELLO", "UNIX TIME=" + time);
+
+            // Convert unix time to local time
+            TimeZone timeZone = TimeZone.getDefault();
+            int timeZoneOffset = timeZone.getRawOffset() / 1000;
+            time = time + timeZoneOffset;
+            Log.d("HELLO", "TIMEZONE OFFSET=" + timeZoneOffset);
+            Log.d("HELLO", "LOCAL TIME=" + time);
+
+            // Conver to uint32_t (little endian)
+            byte[] data = new byte[4];
+            data[3] = (byte) ((time & 0xFF000000L) >> 24);
+            data[2] = (byte) ((time & 0x00FF0000L) >> 16);
+            data[1] = (byte) ((time & 0x0000FF00L) >> 8);
+            data[0] = (byte) (time & 0x000000FFL);
 
             mBluetoothGattServer.sendResponse(device, requestId, 0, offset, data);
 
@@ -417,8 +437,8 @@ public class PixwatchService extends Service {
     public void addDefinedGattServerServices( )
     {
         mBluetoothGattServer = mBluetoothManager.openGattServer(this, mGattServerCallback);
-        BluetoothGattService service = new BluetoothGattService(UUID.fromString(SampleGattAttributes.CURRENT_TIME_SERVICE_UUID), BluetoothGattService.SERVICE_TYPE_PRIMARY);
-        BluetoothGattCharacteristic characteristic = new BluetoothGattCharacteristic(UUID.fromString(SampleGattAttributes.CURRENT_TIME), BluetoothGattCharacteristic.PROPERTY_READ, BluetoothGattCharacteristic.PERMISSION_READ);
+        BluetoothGattService service = new BluetoothGattService(UUID.fromString(SampleGattAttributes.PIXWATCH_SERVICE_UUID), BluetoothGattService.SERVICE_TYPE_PRIMARY);
+        BluetoothGattCharacteristic characteristic = new BluetoothGattCharacteristic(UUID.fromString(SampleGattAttributes.PIXWATCH_UNIX_TIME), BluetoothGattCharacteristic.PROPERTY_READ, BluetoothGattCharacteristic.PERMISSION_READ);
 
         service.addCharacteristic(characteristic);
         mBluetoothGattServer.addService(service);
